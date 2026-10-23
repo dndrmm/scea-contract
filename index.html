@@ -101,6 +101,22 @@ select,input[type="search"]{width:100%;background:var(--surface);border:1px soli
 .result .lbl{font-size:.85rem;opacity:.85}
 .result .row{display:flex;gap:18px;flex-wrap:wrap;font-size:.9rem}
 .result .row b{display:block;font:700 1.25rem/1.1 var(--display)}
+.extras{display:grid;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px}
+.extras h3{margin:0}
+.extras label{font-size:.8rem;font-weight:600;color:var(--muted);display:block;margin-bottom:4px}
+.eplist{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.eplist:empty{display:none}
+.eplist li{display:flex;align-items:center;gap:8px;background:var(--sunk);border-radius:8px;padding:8px 10px}
+.eplist .nm{flex:1;min-width:0;font-weight:600;line-height:1.25}
+.eplist .nm small{display:block;font-weight:500;color:var(--muted);font-size:.78rem;margin-top:2px}
+.eplist button{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:7px;font:600 .78rem/1 var(--ui);padding:7px 8px;cursor:pointer}
+.eplist button[aria-pressed="true"]{background:var(--scarlet);border-color:var(--scarlet);color:var(--on-scarlet)}
+.eplist button.x{font-size:1.1rem;padding:4px 9px;color:var(--muted)}
+.yrs tbody tr{cursor:pointer}
+.yrs th,.yrs td{padding:8px 6px;font-size:.84rem}
+.yrs th:first-child,.yrs td:first-child{padding-left:10px}
+.yrs th:last-child,.yrs td:last-child{padding-right:10px}
+.yrs tfoot td{font-weight:700;border-top:2px solid var(--line)}
 .path{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .path button{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:9px 8px;min-width:0;text-align:left;cursor:pointer;color:var(--ink)}
 .path button.on{border-color:var(--scarlet);box-shadow:inset 0 0 0 1px var(--scarlet)}
@@ -259,15 +275,28 @@ nav.tabs a[aria-current="page"]{color:var(--scarlet)}
       <div><label>Column</label><div class="seg" id="colSeg" role="group" aria-label="Column"></div></div>
       <div><label for="stepSel" id="stepLab">Your step</label><select id="stepSel"></select><p class="foot" style="margin:6px 0 0">Set your step for any year and the other years follow, one step up each year. Hired after 2026-27? Pick your first year, then Step 1.</p></div>
     </div>
+    <div class="extras">
+      <h3 class="lab">Extra pay (optional)</h3>
+      <div>
+        <label for="epAdd">Extra duty positions</label>
+        <ul class="eplist" id="epList"></ul>
+        <select id="epAdd" style="margin-top:8px"></select>
+      </div>
+      <div>
+        <label for="caseSel">Special ed caseload (<a href="#s2-9">&sect;2.9</a>)</label>
+        <select id="caseSel"><option value="0">None</option><option value="1">1-15 students (+$200)</option><option value="2">16-30 students (+$300)</option><option value="3">31-45 students (+$400)</option><option value="4">46+ students (+$500)</option></select>
+      </div>
+    </div>
     <div class="result" aria-live="polite">
-      <div><div class="lbl" id="resLbl"></div><div class="amt num-t" id="resAmt"></div></div>
+      <div><div class="lbl" id="resLbl"></div><div class="amt num-t" id="resAmt"></div><div class="lbl" id="resSub"></div></div>
       <div class="row">
         <div><b class="num-t" id="resTcv"></b><span id="resTcvLbl"></span></div>
       </div>
     </div>
     <div>
       <h3 class="lab">Your four years</h3>
-      <div class="path" id="path"></div>
+      <div class="tw"><table class="sched yrs"><thead id="yrsHead"></thead><tbody id="yrsBody"></tbody><tfoot id="yrsFoot"></tfoot></table></div>
+      <p class="foot" id="yrsNote"></p>
     </div>
     <div>
       <h3 class="lab" id="schedLab">Full schedule</h3>
@@ -366,6 +395,7 @@ const HOURLY = {ins:[33.5,34,34.5,35], non:[26.5,27,27.5,28]};
   fmt2(HOURLY.ins[i])+" instructional, "+fmt2(HOURLY.non[i])+" non-instructional <small>"+YEARS[i].replace("-20","-")+" rates. Pre-approval required.</small>";})();
 
 /* ---------- salary ---------- */
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 /* One person on one track: an anchor (year + step) the user set, and the year being viewed.
    Every other year's step is derived from the anchor: one step per year, capped at 21. */
 const S = {ay: store.get("ay", currentYearIdx()), as: store.get("as", 1), c: store.get("c", 0), vy: store.get("vy", currentYearIdx())};
@@ -381,28 +411,54 @@ stepSel.onchange=()=>{if(!stepSel.value)return;S.ay=S.vy;S.as=+stepSel.value;ren
 segment(yearSeg, YEARS.map(YLAB), ()=>S.vy, i=>{S.vy=i;renderSalary()});
 segment(document.getElementById("colSeg"), COLS, ()=>S.c, i=>{S.c=i;renderSalary()});
 function setStep(st){S.ay=S.vy;S.as=st;renderSalary()}
+/* extra pay: Appendix B positions (optional 50% split) + caseload stipend, assumed held every year on the schedule */
+const CASE=[0,200,300,400,500];
+let EP=store.get("ep",[]); if(!Array.isArray(EP))EP=[]; let CS=store.get("cs",0); if(!(CS>=0&&CS<5))CS=0;
+const POS={}; D.duties.cats.forEach(c=>c.positions.forEach(n=>POS[n]=c));
+EP=EP.filter(e=>e&&POS[e.n]);
+const epAdd=document.getElementById("epAdd"), caseSel=document.getElementById("caseSel");
+function buildEpAdd(){epAdd.innerHTML='<option value="">+ Add a position</option>'+D.duties.cats.map(c=>{
+  const ps=c.positions.filter(n=>!EP.some(e=>e.n===n));if(!ps.length)return"";
+  return '<optgroup label="Category '+c.cat+' ('+fmt(c.pay[S.vy])+')">'+ps.map(n=>'<option>'+esc(n)+'</option>').join("")+'</optgroup>'}).join("")}
+epAdd.onchange=()=>{if(epAdd.value){EP.push({n:epAdd.value,h:false});renderSalary()}};
+caseSel.value=String(CS); caseSel.onchange=()=>{CS=+caseSel.value;renderSalary()};
+function posPay(e,yi){return POS[e.n].pay[yi]*(e.h?.5:1)}
+function extraAt(yi){if(!stepAt(yi))return 0;return EP.reduce((t,e)=>t+posPay(e,yi),0)+CASE[CS]}
+function renderEp(){const ul=document.getElementById("epList");ul.innerHTML="";
+  EP.forEach((e,i)=>{const li=document.createElement("li");
+    li.innerHTML='<div class="nm">'+esc(e.n)+'<small>Category '+POS[e.n].cat+' \u00b7 '+fmt(posPay(e,S.vy))+' in '+YLAB(YEARS[S.vy])+'</small></div><button type="button" aria-pressed="'+e.h+'" aria-label="Split 50%">50%</button><button type="button" class="x" aria-label="Remove '+esc(e.n)+'">\u00d7</button>';
+    li.children[1].onclick=()=>{e.h=!e.h;renderSalary()}; li.children[2].onclick=()=>{EP.splice(i,1);renderSalary()}; ul.appendChild(li)});
+  buildEpAdd(); store.set("ep",EP); store.set("cs",CS)}
 function renderSalary(){
   ["ay","as","c","vy"].forEach(k=>store.set(k,S[k]));
   syncSeg(yearSeg,S.vy);
   const cur=stepAt(S.vy);
   document.getElementById("stepLab").textContent="Your step in "+YEARS[S.vy];
   stepSel.value=cur?String(cur):"";
-  if(cur){const v=sal(S.vy,cur,S.c);
+  renderEp();
+  const hasX = EP.length>0 || CS>0;
+  const sub=document.getElementById("resSub");
+  if(cur){const v=sal(S.vy,cur,S.c), x=extraAt(S.vy);
     document.getElementById("resLbl").textContent=YEARS[S.vy]+" · Step "+cur+" · "+COLS[S.c];
-    document.getElementById("resAmt").textContent=fmt(v);
+    document.getElementById("resAmt").textContent=fmt(v+x);
+    sub.textContent = hasX ? fmt(v)+" salary + "+fmt(x)+" extra pay" : "";
   } else {
     document.getElementById("resLbl").textContent=YEARS[S.vy]+" · "+COLS[S.c];
-    document.getElementById("resAmt").textContent="Not hired yet";
+    document.getElementById("resAmt").textContent="Not hired yet"; sub.textContent="";
   }
-  const path=document.getElementById("path");path.innerHTML="";
-  let tcv=0, ny=0;
-  for(let yi=0;yi<YEARS.length;yi++){const st=stepAt(yi);const d=document.createElement("button");d.type="button";
-    if(yi===S.vy)d.className="on";
-    if(st){tcv+=sal(yi,st,S.c);ny++}
-    d.innerHTML="<small>"+YLAB(YEARS[yi])+"</small><b class='num-t'>"+(st?fmt(sal(yi,st,S.c)):"–")+"</b><span>"+(st?"Step "+st:"Not hired yet")+"</span>";
-    d.onclick=()=>{S.vy=yi;renderSalary()};path.appendChild(d)}
-  document.getElementById("resTcv").textContent=fmt(tcv);
-  document.getElementById("resTcvLbl").textContent=(ny===YEARS.length?"Total Contract Value of all four years of this agreement":"Total Contract Value of "+ny+" of the four years of this agreement");
+  sub.hidden=!sub.textContent;
+  let tb0=0, tx=0, ny=0; const rows=[];
+  for(let yi=0;yi<YEARS.length;yi++){const st=stepAt(yi);
+    if(st){const bse=sal(yi,st,S.c), x=extraAt(yi); tb0+=bse; tx+=x; ny++; rows.push([yi,st,bse,x])} else rows.push([yi,null,0,0])}
+  document.getElementById("yrsHead").innerHTML="<tr><th>Year</th><th>Step</th><th>Salary</th>"+(hasX?"<th>Extra</th><th>Total</th>":"")+"</tr>";
+  const yb=document.getElementById("yrsBody"); yb.innerHTML="";
+  rows.forEach(([yi,st,bse,x])=>{const tr=document.createElement("tr"); if(yi===S.vy)tr.className="hit";
+    tr.innerHTML="<td>"+YLAB(YEARS[yi])+"</td>"+(st?"<td>"+st+"</td><td>"+fmt(bse)+"</td>"+(hasX?"<td>"+fmt(x)+"</td><td>"+fmt(bse+x)+"</td>":""):"<td colspan='"+(hasX?4:2)+"' style='text-align:left;color:var(--muted)'>Not hired yet</td>");
+    tr.onclick=()=>{S.vy=yi;renderSalary()}; yb.appendChild(tr)});
+  document.getElementById("yrsFoot").innerHTML="<tr><td colspan='2'>Total</td><td>"+fmt(tb0)+"</td>"+(hasX?"<td>"+fmt(tx)+"</td><td>"+fmt(tb0+tx)+"</td>":"")+"</tr>";
+  document.getElementById("yrsNote").textContent = hasX ? "Extra pay assumes you hold the same positions and caseload every year. Tap a year to see it above." : "Tap a year to see it above.";
+  document.getElementById("resTcv").textContent=fmt(tb0+tx);
+  document.getElementById("resTcvLbl").textContent=(ny===YEARS.length?"Total Contract Value of all four years of this agreement":"Total Contract Value of "+ny+" of the four years of this agreement")+(hasX?", including extra pay":"");
   document.getElementById("schedLab").textContent="Full schedule, "+YEARS[S.vy];
   const tb=document.getElementById("schedBody");tb.innerHTML="";
   D.salary[YEARS[S.vy]].forEach(r=>{const tr=document.createElement("tr");if(r[0]===cur)tr.className="hit";
@@ -415,7 +471,6 @@ renderSalary();
 let dy=currentYearIdx();
 segment(document.getElementById("dutySeg"), YEARS.map(YLAB), ()=>dy, i=>{dy=i;renderDuties()});
 const dq=document.getElementById("dutyQ"); dq.oninput=renderDuties;
-function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function renderDuties(){
   const q=dq.value.trim().toLowerCase(); const box=document.getElementById("dutyList"); box.innerHTML=""; let n=0;
   D.duties.cats.forEach(c=>{const ps=c.positions.filter(p=>!q||p.toLowerCase().includes(q)||("category "+c.cat).toLowerCase()===q);if(!ps.length)return;n++;
